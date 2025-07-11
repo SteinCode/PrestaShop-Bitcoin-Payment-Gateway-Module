@@ -66,7 +66,7 @@ _Added_ support for new JSON and old URL-encoded form data callbacks format. New
 
 ### 2.0.1 (13/02/2025):
 
-Fixed: Issues with plugin settings rendering
+Fixed: Issues with plugin settings rendering.
 
 ### 2.0.0 (13/02/2025):
 
