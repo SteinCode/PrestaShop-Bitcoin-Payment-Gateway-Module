@@ -30,6 +30,7 @@ use GuzzleHttp\Exception\RequestException;
 use SpectroCoin\SCMerchantClient\Enum\OrderStatus;
 use SpectroCoin\SCMerchantClient\Http\OldOrderCallback;
 use SpectroCoin\SCMerchantClient\Http\OrderCallback;
+use SpectroCoin\SCMerchantClient\SCMerchantClient;
 
 if (!defined('_PS_VERSION_')) {
     exit;
@@ -46,66 +47,105 @@ class SpectrocoinCallbackModuleFrontController extends ModuleFrontController
     public function postProcess(): void
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            PrestaShopLogger::addLog('SpectroCoin Callback: Invalid request method: ' . $_SERVER['REQUEST_METHOD'], 3);
+            PrestaShopLogger::addLog(
+                'SpectroCoin Callback: Invalid request method: ' . $_SERVER['REQUEST_METHOD'],
+                3
+            );
             http_response_code(405);
             exit;
         }
 
         try {
-            // Determine callback format by Content-Type
+            // 1) figure out status/raw status value
             if (stripos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== false) {
-                // JSON format: fetch order data by UUID
-                $order_callback = $this->initCallbackFromJson();
-                if (! $order_callback) {
+                $cb = $this->initCallbackFromJson();
+                if (! $cb) {
                     throw new InvalidArgumentException('Invalid JSON callback payload');
                 }
-                
-                $sc_merchant_client = new SCMerchantClient(
+
+                $client = new SCMerchantClient(
                     $this->module->project_id,
                     $this->module->client_id,
                     $this->module->client_secret
-                );  
-                $order_data = $sc_merchant_client->getOrderById(
-                    $order_callback->getUuid()
                 );
+                $orderData = $client->getOrderById($cb->getUuid());
 
-                if (!is_array($order_data) || empty($order_data['orderId']) || empty($order_data['status'])) {
+                if (
+                    !is_array($orderData)
+                    || empty($orderData['orderId'])
+                    || empty($orderData['status'])
+                ) {
                     throw new InvalidArgumentException('Malformed order data from API');
                 }
 
-                $orderId = (int) $order_data['orderId'];
-                $status  = (string) $order_data['status'];
+                $orderIdRaw = $orderData['orderId'];
+                $statusRaw  = $orderData['status'];
             } else {
-                // Form-encoded legacy callback
-                $order_callback = $this->initCallbackFromPost();
-                if (! $order_callback) {
+                $cb = $this->initCallbackFromPost();
+                if (! $cb) {
                     throw new InvalidArgumentException('Invalid form-encoded callback payload');
                 }
 
-                $orderId = (int) $order_callback->getOrderId();
-                $status  = (string) $order_callback->getStatus();
+                $orderIdRaw = $cb->getOrderId();
+                $statusRaw  = $cb->getStatus();
             }
 
-            $history = new OrderHistory();
-            $history->id_order = $orderId;
+            // 2) normalize: numeric values stay int, strings get uppercased
+            if (is_numeric($statusRaw)) {
+                $statusCode = (int) $statusRaw;
+                $statusName = null;
+            } else {
+                $statusCode = null;
+                $statusName = strtoupper((string) $statusRaw);
+            }
 
-            switch ($status) {
-                case OrderStatus::New->value:
-                case OrderStatus::Pending->value:
-                    // No change
+            // 3) apply state change
+            $history            = new OrderHistory();
+            $history->id_order  = (int) $orderIdRaw;
+
+            // we switch on true so we can match either numeric or name
+            switch (true) {
+                // new / pending → do nothing
+                case $statusCode === OrderStatus::NEW->value:
+                case $statusName === OrderStatus::NEW->name:
+                case $statusCode === OrderStatus::PENDING->value:
+                case $statusName === OrderStatus::PENDING->name:
                     break;
-                case OrderStatus::Expired->value:
-                    $history->changeIdOrderState((int) Configuration::get('PS_OS_CANCELED'), $orderId);
+
+                // expired → canceled
+                case $statusCode === OrderStatus::EXPIRED->value:
+                case $statusName === OrderStatus::EXPIRED->name:
+                    $history->changeIdOrderState(
+                        (int) Configuration::get('PS_OS_CANCELED'),
+                        (int) $orderIdRaw
+                    );
                     break;
-                case OrderStatus::Failed->value:
-                    $history->changeIdOrderState((int) Configuration::get('PS_OS_ERROR'), $orderId);
+
+                // failed → error
+                case $statusCode === OrderStatus::FAILED->value:
+                case $statusName === OrderStatus::FAILED->name:
+                    $history->changeIdOrderState(
+                        (int) Configuration::get('PS_OS_ERROR'),
+                        (int) $orderIdRaw
+                    );
                     break;
-                case OrderStatus::Paid->value:
-                    $history->changeIdOrderState((int) Configuration::get('PS_OS_PAYMENT'), $orderId);
-                    $history->addWithemail(true, ['order_name' => $orderId]);
+
+                // paid → payment + email
+                case $statusCode === OrderStatus::PAID->value:
+                case $statusName === OrderStatus::PAID->name:
+                    $history->changeIdOrderState(
+                        (int) Configuration::get('PS_OS_PAYMENT'),
+                        (int) $orderIdRaw
+                    );
+                    $history->addWithemail(true, ['order_name' => $orderIdRaw]);
                     break;
+
+                // anything else is unknown
                 default:
-                    PrestaShopLogger::addLog('SpectroCoin Callback: Unknown order status: ' . $status, 3);
+                    PrestaShopLogger::addLog(
+                        'SpectroCoin Callback: Unknown order status: ' . $statusRaw,
+                        3
+                    );
                     http_response_code(400);
                     exit;
             }
@@ -121,7 +161,10 @@ class SpectrocoinCallbackModuleFrontController extends ModuleFrontController
             http_response_code(400);
             exit;
         } catch (Exception $e) {
-            PrestaShopLogger::addLog('SpectroCoin Callback Exception: ' . get_class($e) . ': ' . $e->getMessage(), 3);
+            PrestaShopLogger::addLog(
+                'SpectroCoin Callback Exception: ' . get_class($e) . ': ' . $e->getMessage(),
+                3
+            );
             http_response_code(500);
             exit;
         }
