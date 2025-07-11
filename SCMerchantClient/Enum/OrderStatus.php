@@ -30,11 +30,10 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-enum OrderStatus: int
-{
-    case New = 1;
-    case Pending = 2;
-    case Paid = 3;
-    case Failed = 4;
-    case Expired = 5;
+enum OrderStatus: int {
+	case New = 1;
+	case Pending = 2;
+	case Paid = 3;
+	case Failed = 4;
+	case Expired = 5;
 }
