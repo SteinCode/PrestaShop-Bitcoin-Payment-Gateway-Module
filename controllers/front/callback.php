@@ -56,7 +56,6 @@ class SpectrocoinCallbackModuleFrontController extends ModuleFrontController
         }
 
         try {
-            // 1) figure out status/raw status value
             if (stripos($_SERVER['CONTENT_TYPE'] ?? '', 'application/json') !== false) {
                 $cb = $this->initCallbackFromJson();
                 if (! $cb) {
@@ -89,50 +88,30 @@ class SpectrocoinCallbackModuleFrontController extends ModuleFrontController
                 $orderIdRaw = $cb->getOrderId();
                 $statusRaw  = $cb->getStatus();
             }
-
-            // 2) normalize: numeric values stay int, strings get uppercased
-            if (is_numeric($statusRaw)) {
-                $statusCode = (int) $statusRaw;
-                $statusName = null;
-            } else {
-                $statusCode = null;
-                $statusName = strtoupper((string) $statusRaw);
-            }
-
-            // 3) apply state change
             $history            = new OrderHistory();
             $history->id_order  = (int) $orderIdRaw;
 
-            // we switch on true so we can match either numeric or name
-            switch (true) {
-                // new / pending → do nothing
-                case $statusCode === OrderStatus::NEW->value:
-                case $statusName === OrderStatus::NEW->name:
-                case $statusCode === OrderStatus::PENDING->value:
-                case $statusName === OrderStatus::PENDING->name:
+            $statusEnum = OrderStatus::normalize($statusRaw);
+
+            switch ($statusEnum) {
+                case $statusEnum::NEW:
                     break;
 
-                // expired → canceled
-                case $statusCode === OrderStatus::EXPIRED->value:
-                case $statusName === OrderStatus::EXPIRED->name:
+                case $statusEnum::EXPIRED:
                     $history->changeIdOrderState(
                         (int) Configuration::get('PS_OS_CANCELED'),
                         (int) $orderIdRaw
                     );
                     break;
 
-                // failed → error
-                case $statusCode === OrderStatus::FAILED->value:
-                case $statusName === OrderStatus::FAILED->name:
+                case $statusEnum::FAILED:
                     $history->changeIdOrderState(
                         (int) Configuration::get('PS_OS_ERROR'),
                         (int) $orderIdRaw
                     );
                     break;
 
-                // paid → payment + email
-                case $statusCode === OrderStatus::PAID->value:
-                case $statusName === OrderStatus::PAID->name:
+               case $statusEnum::PAID:
                     $history->changeIdOrderState(
                         (int) Configuration::get('PS_OS_PAYMENT'),
                         (int) $orderIdRaw
@@ -140,7 +119,6 @@ class SpectrocoinCallbackModuleFrontController extends ModuleFrontController
                     $history->addWithemail(true, ['order_name' => $orderIdRaw]);
                     break;
 
-                // anything else is unknown
                 default:
                     PrestaShopLogger::addLog(
                         'SpectroCoin Callback: Unknown order status: ' . $statusRaw,
