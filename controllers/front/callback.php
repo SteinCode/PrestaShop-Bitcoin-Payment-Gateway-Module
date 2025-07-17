@@ -89,8 +89,8 @@ class SpectrocoinCallbackModuleFrontController extends ModuleFrontController
                 $statusRaw  = $cb->getStatus();
             }
             $history            = new OrderHistory();
-            $history->id_order  = (int) $orderIdRaw;
-
+            $orderId = explode('-', $orderIdRaw, 2)[0];
+            $history->id_order  = (int) $orderId;
             $statusEnum = OrderStatus::normalize($statusRaw);
 
             switch ($statusEnum) {
