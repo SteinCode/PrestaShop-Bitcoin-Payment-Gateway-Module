@@ -31,8 +31,8 @@ use SpectroCoin\SCMerchantClient\Config;
 use Exception;
 use InvalidArgumentException;
 // @codeCoverageIgnoreStart
-if (!defined('ABSPATH')) {
-    die('Access denied.');
+if (!defined('_PS_VERSION_')) {
+    exit;
 }
 // @codeCoverageIgnoreEnd
 
